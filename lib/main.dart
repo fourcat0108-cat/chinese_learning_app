@@ -1,6 +1,15 @@
 import 'package:flutter/material.dart';
+import 'package:firebase_core/firebase_core.dart';
 
-void main() => runApp(const DragComponentApp());
+void main() async {
+  WidgetsFlutterBinding.ensureInitialized();
+  try {
+    await Firebase.initializeApp();
+  } catch (e) {
+    debugPrint("Firebase 初始化失敗: $e");
+  }
+  runApp(const DragComponentApp());
+}
 
 class DragComponentApp extends StatelessWidget {
   const DragComponentApp({super.key});
@@ -147,7 +156,6 @@ class DragGamePage extends StatefulWidget {
 }
 
 class _DragGamePageState extends State<DragGamePage> {
-  // 暫時模擬資料
   final List<Map<String, dynamic>> quizList = [
     {
       'target': '校',
@@ -159,23 +167,6 @@ class _DragGamePageState extends State<DragGamePage> {
   ];
 
   int currentIndex = 0;
-  String? selectedLeft;
-  String? selectedRight;
-  List<String> shuffledOptions = [];
-
-  @override
-  void initState() {
-    super.initState();
-    _generateShuffledOptions();
-  }
-
-  void _generateShuffledOptions() {
-    setState(() {
-      shuffledOptions = List<String>.from(quizList[currentIndex]['options']);
-      shuffledOptions.shuffle();
-    });
-  }
-
   @override
   Widget build(BuildContext context) {
     final quiz = quizList[currentIndex];
@@ -184,22 +175,14 @@ class _DragGamePageState extends State<DragGamePage> {
         title: Text(widget.info),
         backgroundColor: Colors.teal[100],
       ),
-      body: Column(
-        children: [
-          const SizedBox(height: 40),
-          Text(
-            quiz['target'],
-            style: const TextStyle(fontSize: 80, fontWeight: FontWeight.bold),
-          ),
-          Text(
-            quiz['pinyin'],
-            style: const TextStyle(fontSize: 28, color: Colors.teal),
-          ),
-          const Spacer(),
-          // ... 拖曳邏輯保持不變 (為了節省篇幅，簡略顯示) ...
-          const Text("遊戲區執行中...", style: TextStyle(fontSize: 20)),
-          const Spacer(),
-        ],
+      body: Center(
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Text(quiz['target'], style: const TextStyle(fontSize: 80)),
+            const Text("遊戲連線測試中...", style: TextStyle(fontSize: 20)),
+          ],
+        ),
       ),
     );
   }

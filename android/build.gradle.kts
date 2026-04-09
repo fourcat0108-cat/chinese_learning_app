@@ -1,3 +1,7 @@
+plugins {
+    // 加入這一行，這是 Firebase 的插件控制器
+    id("com.google.gms.google-services") version "4.4.1" apply false
+}
 allprojects {
     repositories {
         google()

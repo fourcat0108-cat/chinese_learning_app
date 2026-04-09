@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "415968209787",
+    "project_id": "chiness-words",
+    "storage_bucket": "chiness-words.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:415968209787:android:e916ee97b0b722d6ea2bde",
+        "android_client_info": {
+          "package_name": "com.example.chinese_learning_app"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyDl-A9ew1PYBPr_cxgblBaTysH9mgy1V_8"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
