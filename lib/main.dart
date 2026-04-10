@@ -174,13 +174,17 @@ class DragGamePage extends StatefulWidget {
 }
 
 class _DragGamePageState extends State<DragGamePage> {
-  // 1. 變數宣告 (對應你原本的 177-179 行，並增加新功能所需的變數)
   List<Map<String, dynamic>> quizList = [];
   int currentIndex = 0;
   bool isLoading = true;
 
   String? leftPlaced; // 紀錄左邊格子放了什麼字
   String? rightPlaced; // 紀錄右邊格子放了什麼字
+
+  // 新增：控制是否顯示錯誤的變數
+  bool showLeftError = false;
+  bool showRightError = false;
+
   final PageController _pageController = PageController(); // 翻頁控制員
 
   @override
@@ -189,7 +193,7 @@ class _DragGamePageState extends State<DragGamePage> {
     _fetchDataFromFirestore();
   }
 
-  // --- 自動轉換 ID 的邏輯 (保持不變) ---
+  // --- 自動轉換 ID 的邏輯 ---
   String _generateDocId(String info) {
     try {
       final parts = info.split(' ');
@@ -205,7 +209,7 @@ class _DragGamePageState extends State<DragGamePage> {
     }
   }
 
-  // --- 抓取資料 (對應你原本 201 行之後的邏輯) ---
+  // --- 抓取資料 ---
   Future<void> _fetchDataFromFirestore() async {
     try {
       String docId = _generateDocId(widget.info);
@@ -233,15 +237,68 @@ class _DragGamePageState extends State<DragGamePage> {
     }
   }
 
+  // --- 處理「下一題」或「過關」邏輯 ---
+  void _nextQuiz() {
+    if (currentIndex < quizList.length - 1) {
+      // 還有下一題，重置狀態並翻回第一頁
+      setState(() {
+        currentIndex++;
+        leftPlaced = null;
+        rightPlaced = null;
+        showLeftError = false;
+        showRightError = false;
+      });
+      // 跳回第一頁讓小朋友看下一個字
+      _pageController.jumpToPage(0);
+    } else {
+      // 全都答對了，顯示過關視窗
+      showDialog(
+        context: context,
+        barrierDismissible: false, // 點擊旁邊不能關閉
+        builder: (context) => AlertDialog(
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(20),
+          ),
+          title: const Text(
+            "🏆 恭喜過關！",
+            textAlign: TextAlign.center,
+            style: TextStyle(fontSize: 28),
+          ),
+          content: const Text(
+            "你已經完成這一課所有的生字了！太棒了！",
+            textAlign: TextAlign.center,
+            style: TextStyle(fontSize: 18),
+          ),
+          actionsAlignment: MainAxisAlignment.center,
+          actions: [
+            ElevatedButton(
+              style: ElevatedButton.styleFrom(backgroundColor: Colors.teal),
+              onPressed: () {
+                Navigator.pop(context); // 關閉 Dialog
+                Navigator.pop(context); // 回到課堂列表頁
+              },
+              child: const Text(
+                "回到目錄",
+                style: TextStyle(color: Colors.white, fontSize: 18),
+              ),
+            ),
+          ],
+        ),
+      );
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
-    if (isLoading)
+    if (isLoading) {
       return const Scaffold(body: Center(child: CircularProgressIndicator()));
-    if (quizList.isEmpty)
+    }
+    if (quizList.isEmpty) {
       return Scaffold(
         appBar: AppBar(title: Text(widget.info)),
         body: const Center(child: Text("尚無資料")),
       );
+    }
 
     final quiz = quizList[currentIndex];
 
@@ -249,10 +306,26 @@ class _DragGamePageState extends State<DragGamePage> {
       appBar: AppBar(
         title: Text(widget.info),
         backgroundColor: Colors.teal[100],
+        // 右上角顯示進度
+        actions: [
+          Center(
+            child: Padding(
+              padding: const EdgeInsets.only(right: 16.0),
+              child: Text(
+                "進度: ${currentIndex + 1} / ${quizList.length}",
+                style: const TextStyle(
+                  fontSize: 18,
+                  fontWeight: FontWeight.bold,
+                  color: Colors.teal,
+                ),
+              ),
+            ),
+          ),
+        ],
       ),
       body: PageView(
         controller: _pageController,
-        physics: const NeverScrollableScrollPhysics(), // 只能按按鈕翻頁，防止不小心滑動
+        physics: const NeverScrollableScrollPhysics(), // 只能按按鈕翻頁
         children: [
           _buildStudyPage(quiz), // 第一頁：觀察
           _buildQuizPage(quiz), // 第二頁：挑戰
@@ -271,21 +344,22 @@ class _DragGamePageState extends State<DragGamePage> {
           style: TextStyle(fontSize: 20, color: Colors.grey),
         ),
         const SizedBox(height: 20),
-        Text(
-          quiz['target'],
-          style: const TextStyle(fontSize: 120, fontWeight: FontWeight.bold),
-        ),
-        Text(
-          quiz['pinyin'] ?? '',
-          style: const TextStyle(fontSize: 30, color: Colors.teal),
-        ),
+        // 使用 RubyText 來顯示有注音的目標字
+        _rubyText(quiz['target'], quiz['pinyin'], fontSize: 120),
         const SizedBox(height: 50),
         ElevatedButton(
           onPressed: () => _pageController.nextPage(
             duration: const Duration(milliseconds: 400),
             curve: Curves.easeInOut,
           ),
-          child: const Text("記好了，去挑戰！"),
+          style: ElevatedButton.styleFrom(
+            padding: const EdgeInsets.symmetric(horizontal: 40, vertical: 15),
+            backgroundColor: Colors.teal,
+          ),
+          child: const Text(
+            "記好了，去挑戰！",
+            style: TextStyle(fontSize: 22, color: Colors.white),
+          ),
         ),
       ],
     );
@@ -298,7 +372,7 @@ class _DragGamePageState extends State<DragGamePage> {
     return Column(
       mainAxisAlignment: MainAxisAlignment.center,
       children: [
-        const Text("🧩 憑記憶拼出來", style: TextStyle(fontSize: 20)),
+        const Text("🧩 憑記憶拼出來", style: TextStyle(fontSize: 24)),
         const SizedBox(height: 40),
         Row(
           mainAxisAlignment: MainAxisAlignment.center,
@@ -314,14 +388,36 @@ class _DragGamePageState extends State<DragGamePage> {
           children: options.map((char) => _buildDraggableItem(char)).toList(),
         ),
         const SizedBox(height: 50),
+
+        // 判斷是否兩邊都放對了
         if (leftPlaced == quiz['left'] && rightPlaced == quiz['right'])
-          const Text(
-            "🎉 答對了！你太厲害了！",
-            style: TextStyle(
-              fontSize: 24,
-              color: Colors.green,
-              fontWeight: FontWeight.bold,
-            ),
+          Column(
+            children: [
+              const Text(
+                "🎉 答對了！你太厲害了！",
+                style: TextStyle(
+                  fontSize: 28,
+                  color: Colors.green,
+                  fontWeight: FontWeight.bold,
+                ),
+              ),
+              const SizedBox(height: 20),
+              ElevatedButton.icon(
+                onPressed: _nextQuiz, // 呼叫下一題邏輯
+                icon: const Icon(Icons.arrow_forward, color: Colors.white),
+                label: const Text(
+                  "下一題",
+                  style: TextStyle(fontSize: 20, color: Colors.white),
+                ),
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: Colors.orange,
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 30,
+                    vertical: 12,
+                  ),
+                ),
+              ),
+            ],
           ),
       ],
     );
@@ -341,7 +437,7 @@ class _DragGamePageState extends State<DragGamePage> {
           child: Text(
             char,
             style: const TextStyle(
-              fontSize: 24,
+              fontSize: 30,
               color: Colors.white,
               decoration: TextDecoration.none,
             ),
@@ -355,7 +451,7 @@ class _DragGamePageState extends State<DragGamePage> {
           borderRadius: BorderRadius.circular(8),
           border: Border.all(color: Colors.teal),
         ),
-        child: Text(char, style: const TextStyle(fontSize: 24)),
+        child: Text(char, style: const TextStyle(fontSize: 30)),
       ),
     );
   }
@@ -363,25 +459,105 @@ class _DragGamePageState extends State<DragGamePage> {
   Widget _buildTargetBox(String correctChar, bool isLeft) {
     String? current = isLeft ? leftPlaced : rightPlaced;
     bool isCorrect = current == correctChar;
+    // 判斷是否要顯示錯誤回饋
+    bool isError = isLeft ? showLeftError : showRightError;
 
     return DragTarget<String>(
-      onAccept: (data) =>
-          setState(() => isLeft ? leftPlaced = data : rightPlaced = data),
+      onAccept: (data) {
+        setState(() {
+          if (isLeft) {
+            leftPlaced = data;
+            showLeftError = false; // 剛放下時先不顯示錯誤
+          } else {
+            rightPlaced = data;
+            showRightError = false;
+          }
+        });
+
+        // 如果放錯了，啟動 2 秒計時器
+        if (data != correctChar) {
+          Future.delayed(const Duration(seconds: 2), () {
+            if (mounted) {
+              // 確保頁面沒被關掉
+              setState(() {
+                if (isLeft && leftPlaced == data) showLeftError = true;
+                if (!isLeft && rightPlaced == data) showRightError = true;
+              });
+            }
+          });
+        }
+      },
       builder: (context, candidateData, rejectedData) {
         return Container(
-          width: 70,
-          height: 70,
+          width: 80, // 稍微加寬
+          height: 110, // 稍微加高以容納下方提示字
           alignment: Alignment.center,
           decoration: BoxDecoration(
+            // 邏輯：對了變綠色，錯了 2 秒變紅色，平常灰色
             border: Border.all(
-              color: isCorrect ? Colors.green : Colors.grey,
-              width: 2,
+              color: isCorrect
+                  ? Colors.green
+                  : (isError ? Colors.red : Colors.grey),
+              width: isError || isCorrect ? 3 : 2, // 對或錯時邊框加粗
             ),
-            color: isCorrect ? Colors.green[50] : Colors.white,
+            color: isCorrect
+                ? Colors.green[50]
+                : (isError ? Colors.red[50] : Colors.white),
+            borderRadius: BorderRadius.circular(10), // 加上圓角更漂亮
           ),
-          child: Text(current ?? '?', style: const TextStyle(fontSize: 30)),
+          child: Column(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              _rubyText(
+                current ?? '?',
+                isCorrect
+                    ? (isLeft ? "ㄕㄡˇ" : "ㄅㄞˊ")
+                    : "", // 若未來資料庫加上了注音，此處可換成 quiz['left_pinyin']
+                fontSize: 40, // 讓格子裡的字大一點
+              ),
+              if (isError) // 如果錯了 2 秒，下面出一行小字提示
+                const Padding(
+                  padding: EdgeInsets.only(top: 4),
+                  child: Text(
+                    "再試試",
+                    style: TextStyle(
+                      fontSize: 12,
+                      color: Colors.red,
+                      fontWeight: FontWeight.bold,
+                    ),
+                  ),
+                ),
+            ],
+          ),
         );
       },
+    );
+  }
+
+  // 這是專門畫「國字+注音」的小工具 (加上了預設字體大小參數)
+  Widget _rubyText(String kanji, String? zhuyin, {double fontSize = 30}) {
+    return Column(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        // 上方注音
+        Text(
+          zhuyin ?? '',
+          style: TextStyle(
+            fontSize: fontSize * 0.4,
+            color: Colors.teal,
+            height: 1.0,
+          ),
+        ),
+        // 下方國字
+        Text(
+          kanji,
+          style: TextStyle(
+            fontSize: fontSize,
+            fontWeight: FontWeight.bold,
+            height: 1.0,
+          ),
+        ),
+      ],
     );
   }
 }
