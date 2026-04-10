@@ -54,6 +54,22 @@ class VersionMenuPage extends StatelessWidget {
         title: const Text('選擇教材版本'),
         centerTitle: true,
         backgroundColor: Colors.teal[100],
+        // ✨ 新增：右上角的「教師後台」入口
+        actions: [
+          IconButton(
+            icon: const Icon(Icons.cloud_upload, color: Colors.teal, size: 30),
+            tooltip: '教師專屬建檔後台',
+            onPressed: () {
+              Navigator.push(
+                context,
+                MaterialPageRoute(
+                  builder: (context) => const TeacherBackendPage(),
+                ),
+              );
+            },
+          ),
+          const SizedBox(width: 10),
+        ],
       ),
       body: ListView.builder(
         padding: const EdgeInsets.all(20),
@@ -145,7 +161,7 @@ class LessonMenuPage extends StatelessWidget {
 
   Widget _buildLessonList(BuildContext context, String semester) {
     return ListView.builder(
-      itemCount: 10,
+      itemCount: 20, // 改成 20 課比較充裕
       itemBuilder: (context, index) {
         String lessonName = '第 ${index + 1} 課';
         return ListTile(
@@ -181,11 +197,10 @@ class _DragGamePageState extends State<DragGamePage> {
   String? leftPlaced; // 紀錄左邊格子放了什麼字
   String? rightPlaced; // 紀錄右邊格子放了什麼字
 
-  // 新增：控制是否顯示錯誤的變數
   bool showLeftError = false;
   bool showRightError = false;
 
-  final PageController _pageController = PageController(); // 翻頁控制員
+  final PageController _pageController = PageController();
 
   @override
   void initState() {
@@ -193,7 +208,6 @@ class _DragGamePageState extends State<DragGamePage> {
     _fetchDataFromFirestore();
   }
 
-  // --- 自動轉換 ID 的邏輯 ---
   String _generateDocId(String info) {
     try {
       final parts = info.split(' ');
@@ -209,7 +223,6 @@ class _DragGamePageState extends State<DragGamePage> {
     }
   }
 
-  // --- 抓取資料 ---
   Future<void> _fetchDataFromFirestore() async {
     try {
       String docId = _generateDocId(widget.info);
@@ -237,10 +250,8 @@ class _DragGamePageState extends State<DragGamePage> {
     }
   }
 
-  // --- 處理「下一題」或「過關」邏輯 ---
   void _nextQuiz() {
     if (currentIndex < quizList.length - 1) {
-      // 還有下一題，重置狀態並翻回第一頁
       setState(() {
         currentIndex++;
         leftPlaced = null;
@@ -248,13 +259,11 @@ class _DragGamePageState extends State<DragGamePage> {
         showLeftError = false;
         showRightError = false;
       });
-      // 跳回第一頁讓小朋友看下一個字
       _pageController.jumpToPage(0);
     } else {
-      // 全都答對了，顯示過關視窗
       showDialog(
         context: context,
-        barrierDismissible: false, // 點擊旁邊不能關閉
+        barrierDismissible: false,
         builder: (context) => AlertDialog(
           shape: RoundedRectangleBorder(
             borderRadius: BorderRadius.circular(20),
@@ -274,8 +283,8 @@ class _DragGamePageState extends State<DragGamePage> {
             ElevatedButton(
               style: ElevatedButton.styleFrom(backgroundColor: Colors.teal),
               onPressed: () {
-                Navigator.pop(context); // 關閉 Dialog
-                Navigator.pop(context); // 回到課堂列表頁
+                Navigator.pop(context);
+                Navigator.pop(context);
               },
               child: const Text(
                 "回到目錄",
@@ -296,7 +305,9 @@ class _DragGamePageState extends State<DragGamePage> {
     if (quizList.isEmpty) {
       return Scaffold(
         appBar: AppBar(title: Text(widget.info)),
-        body: const Center(child: Text("尚無資料")),
+        body: const Center(
+          child: Text("尚無資料，請老師前往後台建檔！", style: TextStyle(fontSize: 20)),
+        ),
       );
     }
 
@@ -306,7 +317,6 @@ class _DragGamePageState extends State<DragGamePage> {
       appBar: AppBar(
         title: Text(widget.info),
         backgroundColor: Colors.teal[100],
-        // 右上角顯示進度
         actions: [
           Center(
             child: Padding(
@@ -325,16 +335,12 @@ class _DragGamePageState extends State<DragGamePage> {
       ),
       body: PageView(
         controller: _pageController,
-        physics: const NeverScrollableScrollPhysics(), // 只能按按鈕翻頁
-        children: [
-          _buildStudyPage(quiz), // 第一頁：觀察
-          _buildQuizPage(quiz), // 第二頁：挑戰
-        ],
+        physics: const NeverScrollableScrollPhysics(),
+        children: [_buildStudyPage(quiz), _buildQuizPage(quiz)],
       ),
     );
   }
 
-  // 頁面 A：看字
   Widget _buildStudyPage(Map<String, dynamic> quiz) {
     return Column(
       mainAxisAlignment: MainAxisAlignment.center,
@@ -344,7 +350,6 @@ class _DragGamePageState extends State<DragGamePage> {
           style: TextStyle(fontSize: 20, color: Colors.grey),
         ),
         const SizedBox(height: 20),
-        // 使用 RubyText 來顯示有注音的目標字
         _rubyText(quiz['target'], quiz['pinyin'], fontSize: 120),
         const SizedBox(height: 50),
         ElevatedButton(
@@ -365,9 +370,9 @@ class _DragGamePageState extends State<DragGamePage> {
     );
   }
 
-  // 頁面 B：拼字遊戲
   Widget _buildQuizPage(Map<String, dynamic> quiz) {
-    List<String> options = List<String>.from(quiz['options']);
+    List<String> options = List<String>.from(quiz['options'])
+      ..shuffle(); // 打亂選項
 
     return Column(
       mainAxisAlignment: MainAxisAlignment.center,
@@ -377,9 +382,9 @@ class _DragGamePageState extends State<DragGamePage> {
         Row(
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
-            _buildTargetBox(quiz['left'], true), // 左格
+            _buildTargetBox(quiz['left'], true, quiz),
             const Text(" + ", style: TextStyle(fontSize: 30)),
-            _buildTargetBox(quiz['right'], false), // 右格
+            _buildTargetBox(quiz['right'], false, quiz),
           ],
         ),
         const SizedBox(height: 60),
@@ -388,8 +393,6 @@ class _DragGamePageState extends State<DragGamePage> {
           children: options.map((char) => _buildDraggableItem(char)).toList(),
         ),
         const SizedBox(height: 50),
-
-        // 判斷是否兩邊都放對了
         if (leftPlaced == quiz['left'] && rightPlaced == quiz['right'])
           Column(
             children: [
@@ -403,7 +406,7 @@ class _DragGamePageState extends State<DragGamePage> {
               ),
               const SizedBox(height: 20),
               ElevatedButton.icon(
-                onPressed: _nextQuiz, // 呼叫下一題邏輯
+                onPressed: _nextQuiz,
                 icon: const Icon(Icons.arrow_forward, color: Colors.white),
                 label: const Text(
                   "下一題",
@@ -456,29 +459,36 @@ class _DragGamePageState extends State<DragGamePage> {
     );
   }
 
-  Widget _buildTargetBox(String correctChar, bool isLeft) {
+  // 修改：傳入整包 quiz，方便抓取裡面的注音資料
+  Widget _buildTargetBox(
+    String correctChar,
+    bool isLeft,
+    Map<String, dynamic> quiz,
+  ) {
     String? current = isLeft ? leftPlaced : rightPlaced;
     bool isCorrect = current == correctChar;
-    // 判斷是否要顯示錯誤回饋
     bool isError = isLeft ? showLeftError : showRightError;
+
+    // ✨ 動態抓取資料庫裡的注音
+    String correctPinyin = isLeft
+        ? (quiz['left_pinyin'] ?? '')
+        : (quiz['right_pinyin'] ?? '');
 
     return DragTarget<String>(
       onAccept: (data) {
         setState(() {
           if (isLeft) {
             leftPlaced = data;
-            showLeftError = false; // 剛放下時先不顯示錯誤
+            showLeftError = false;
           } else {
             rightPlaced = data;
             showRightError = false;
           }
         });
 
-        // 如果放錯了，啟動 2 秒計時器
         if (data != correctChar) {
           Future.delayed(const Duration(seconds: 2), () {
             if (mounted) {
-              // 確保頁面沒被關掉
               setState(() {
                 if (isLeft && leftPlaced == data) showLeftError = true;
                 if (!isLeft && rightPlaced == data) showRightError = true;
@@ -489,33 +499,30 @@ class _DragGamePageState extends State<DragGamePage> {
       },
       builder: (context, candidateData, rejectedData) {
         return Container(
-          width: 80, // 稍微加寬
-          height: 110, // 稍微加高以容納下方提示字
+          width: 80,
+          height: 110,
           alignment: Alignment.center,
           decoration: BoxDecoration(
-            // 邏輯：對了變綠色，錯了 2 秒變紅色，平常灰色
             border: Border.all(
               color: isCorrect
                   ? Colors.green
                   : (isError ? Colors.red : Colors.grey),
-              width: isError || isCorrect ? 3 : 2, // 對或錯時邊框加粗
+              width: isError || isCorrect ? 3 : 2,
             ),
             color: isCorrect
                 ? Colors.green[50]
                 : (isError ? Colors.red[50] : Colors.white),
-            borderRadius: BorderRadius.circular(10), // 加上圓角更漂亮
+            borderRadius: BorderRadius.circular(10),
           ),
           child: Column(
             mainAxisAlignment: MainAxisAlignment.center,
             children: [
               _rubyText(
                 current ?? '?',
-                isCorrect
-                    ? (isLeft ? "ㄕㄡˇ" : "ㄅㄞˊ")
-                    : "", // 若未來資料庫加上了注音，此處可換成 quiz['left_pinyin']
-                fontSize: 40, // 讓格子裡的字大一點
+                isCorrect ? correctPinyin : "", // 答對時，顯示資料庫裡的專屬拼音
+                fontSize: 40,
               ),
-              if (isError) // 如果錯了 2 秒，下面出一行小字提示
+              if (isError)
                 const Padding(
                   padding: EdgeInsets.only(top: 4),
                   child: Text(
@@ -534,12 +541,10 @@ class _DragGamePageState extends State<DragGamePage> {
     );
   }
 
-  // 這是專門畫「國字+注音」的小工具 (加上了預設字體大小參數)
   Widget _rubyText(String kanji, String? zhuyin, {double fontSize = 30}) {
     return Column(
       mainAxisSize: MainAxisSize.min,
       children: [
-        // 上方注音
         Text(
           zhuyin ?? '',
           style: TextStyle(
@@ -548,7 +553,6 @@ class _DragGamePageState extends State<DragGamePage> {
             height: 1.0,
           ),
         ),
-        // 下方國字
         Text(
           kanji,
           style: TextStyle(
@@ -556,6 +560,261 @@ class _DragGamePageState extends State<DragGamePage> {
             fontWeight: FontWeight.bold,
             height: 1.0,
           ),
+        ),
+      ],
+    );
+  }
+}
+
+// ============================================================================
+// ✨ 全新開發：教師專屬上傳後台
+// ============================================================================
+class TeacherBackendPage extends StatefulWidget {
+  const TeacherBackendPage({super.key});
+
+  @override
+  State<TeacherBackendPage> createState() => _TeacherBackendPageState();
+}
+
+class _TeacherBackendPageState extends State<TeacherBackendPage> {
+  String selectedVersion = '康軒';
+  String selectedGrade = '一';
+  String selectedSemester = 'up'; // 對應資料庫的 up / down
+  int selectedLesson = 1;
+
+  final TextEditingController _dataController = TextEditingController();
+  bool isUploading = false;
+
+  Future<void> _uploadData() async {
+    String rawText = _dataController.text.trim();
+    if (rawText.isEmpty) {
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(const SnackBar(content: Text("請貼上資料喔！")));
+      return;
+    }
+
+    setState(() => isUploading = true);
+
+    try {
+      List<String> lines = rawText.split('\n');
+      List<Map<String, dynamic>> wordsToUpload = [];
+
+      for (String line in lines) {
+        if (line.trim().isEmpty) continue;
+
+        // 支援 Tab (Excel 預設) 或 逗號 (CSV) 分隔
+        List<String> parts = line.split(RegExp(r'\t|,|，'));
+        parts = parts.map((e) => e.trim()).toList();
+
+        // 必須要有 7 個欄位才算正確的一列
+        if (parts.length >= 7) {
+          wordsToUpload.add({
+            "target": parts[0],
+            "pinyin": parts[1],
+            "left": parts[2],
+            "left_pinyin": parts[3],
+            "right": parts[4],
+            "right_pinyin": parts[5],
+            "options": parts[6].split(
+              '',
+            ), // 把 "木禾扌白日" 拆成 ['木', '禾', '扌', '白', '日']
+          });
+        }
+      }
+
+      if (wordsToUpload.isEmpty) {
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(const SnackBar(content: Text("格式錯誤，解析失敗。請確認欄位數！")));
+        setState(() => isUploading = false);
+        return;
+      }
+
+      // 自動組合 Document ID
+      String vStr = selectedVersion == '康軒'
+          ? 'KSH'
+          : (selectedVersion == '南一' ? 'NY' : 'HL');
+      String docId =
+          "${vStr}_${selectedGrade}${selectedSemester}_L$selectedLesson";
+
+      // 寫入 Firebase
+      await FirebaseFirestore.instance.collection('lessons').doc(docId).set({
+        'title':
+            '$selectedVersion ${selectedGrade}年級 ${selectedSemester == 'up' ? '上學期' : '下學期'} 第 $selectedLesson 課',
+        'words': wordsToUpload,
+      });
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text("🎉 成功上傳 ${wordsToUpload.length} 個生字到 $docId！")),
+      );
+      _dataController.clear(); // 清空輸入框
+    } catch (e) {
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text("上傳發生錯誤：$e")));
+    }
+
+    setState(() => isUploading = false);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: AppBar(
+        title: const Text(
+          '☁️ 教師建檔後台',
+          style: TextStyle(fontWeight: FontWeight.bold),
+        ),
+        backgroundColor: Colors.orange[200],
+      ),
+      body: SingleChildScrollView(
+        padding: const EdgeInsets.all(20),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            const Text(
+              "1. 選擇要建檔的課次目標",
+              style: TextStyle(
+                fontSize: 18,
+                fontWeight: FontWeight.bold,
+                color: Colors.blueGrey,
+              ),
+            ),
+            const SizedBox(height: 10),
+
+            // 下拉選單區塊
+            Card(
+              elevation: 3,
+              child: Padding(
+                padding: const EdgeInsets.all(16.0),
+                child: Column(
+                  children: [
+                    Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceAround,
+                      children: [
+                        _buildDropdown(
+                          '版本',
+                          ['康軒', '南一', '翰林'],
+                          selectedVersion,
+                          (v) => setState(() => selectedVersion = v!),
+                        ),
+                        _buildDropdown(
+                          '年級',
+                          ['一', '二', '三', '四', '五', '六'],
+                          selectedGrade,
+                          (v) => setState(() => selectedGrade = v!),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 15),
+                    Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceAround,
+                      children: [
+                        _buildDropdown(
+                          '學期',
+                          ['up', 'down'],
+                          selectedSemester,
+                          (v) => setState(() => selectedSemester = v!),
+                          displayMapper: (v) => v == 'up' ? '上學期' : '下學期',
+                        ),
+                        _buildDropdown(
+                          '課次',
+                          List.generate(20, (index) => (index + 1).toString()),
+                          selectedLesson.toString(),
+                          (v) => setState(() => selectedLesson = int.parse(v!)),
+                          displayMapper: (v) => '第 $v 課',
+                        ),
+                      ],
+                    ),
+                  ],
+                ),
+              ),
+            ),
+            const SizedBox(height: 30),
+
+            const Text(
+              "2. 貼上生字資料 (從 Excel 複製)",
+              style: TextStyle(
+                fontSize: 18,
+                fontWeight: FontWeight.bold,
+                color: Colors.blueGrey,
+              ),
+            ),
+            const SizedBox(height: 5),
+            const Text(
+              "⚠️ 欄位順序：目標字 | 拼音 | 左部件 | 左拼音 | 右部件 | 右拼音 | 拖拉選項(字連在一起)",
+              style: TextStyle(color: Colors.red, fontSize: 13),
+            ),
+            const SizedBox(height: 10),
+
+            // 文字輸入區塊
+            TextField(
+              controller: _dataController,
+              maxLines: 12,
+              decoration: InputDecoration(
+                hintText:
+                    "範例：\n拍\tㄆㄞ\t扌\tㄕㄡˇ\t白\tㄅㄞˊ\t木禾扌白日\n找\tㄓㄠˇ\t扌\tㄕㄡˇ\t戈\tㄍㄜ\t木扌白日戈",
+                border: const OutlineInputBorder(),
+                filled: true,
+                fillColor: Colors.grey[100],
+              ),
+            ),
+            const SizedBox(height: 20),
+
+            // 上傳按鈕
+            ElevatedButton(
+              onPressed: isUploading ? null : _uploadData,
+              style: ElevatedButton.styleFrom(
+                backgroundColor: Colors.orange,
+                padding: const EdgeInsets.symmetric(vertical: 15),
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(10),
+                ),
+              ),
+              child: isUploading
+                  ? const CircularProgressIndicator(color: Colors.white)
+                  : const Text(
+                      "🚀 一鍵上傳至 Firebase",
+                      style: TextStyle(
+                        fontSize: 20,
+                        color: Colors.white,
+                        fontWeight: FontWeight.bold,
+                      ),
+                    ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  // 下拉選單小工具
+  Widget _buildDropdown(
+    String label,
+    List<String> items,
+    String value,
+    void Function(String?) onChanged, {
+    String Function(String)? displayMapper,
+  }) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(label, style: const TextStyle(fontSize: 14, color: Colors.grey)),
+        DropdownButton<String>(
+          value: value,
+          items: items
+              .map(
+                (e) => DropdownMenuItem(
+                  value: e,
+                  child: Text(
+                    displayMapper != null ? displayMapper(e) : e,
+                    style: const TextStyle(fontSize: 18),
+                  ),
+                ),
+              )
+              .toList(),
+          onChanged: onChanged,
         ),
       ],
     );
