@@ -1,20 +1,31 @@
 import 'package:cloud_firestore/cloud_firestore.dart'; // 務必加上這一行
 import 'package:flutter/material.dart';
 import 'package:firebase_core/firebase_core.dart';
+
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
-  
+
   // 網頁版初始化必須包含 options 盒子
   await Firebase.initializeApp(
     options: const FirebaseOptions(
-      apiKey: "AIzaSyAVpk8Fat5nx-v1mz-Rlsa8GtQiRoDnO9g", // 你截圖中的 key
-      appId: "1:785265489123:web:xxxxxxxxxxxx",          // 請填入你網頁看到的 appId
-      messagingSenderId: "785265489123",                 // 請填入你網頁看到的 ID
-      projectId: "chinese-learning-app-xxxxx",           // 請填入你的專案 ID
-      storageBucket: "chinese-learning-app-xxxxx.firebasestorage.app",
+      apiKey: "AIzaSyAVpk8Fat5nx-v1mz-Rlsa8GtQiRoDnO9g",
+      authDomain: "chiness-words.firebaseapp.com",
+      projectId: "chiness-words",
+      storageBucket: "chiness-words.firebasestorage.app",
+      messagingSenderId: "415968209787",
+      appId: "1:415968209787:web:6da20ca5a7dbf076ea2bde",
+      measurementId: "G-75JHKWWYYG",
     ),
   );
-  
+  // 加上這幾行，強制關閉網頁版的離線暫存，確保它每次都走網路
+  try {
+    FirebaseFirestore.instance.settings = const Settings(
+      persistenceEnabled: false,
+    );
+  } catch (e) {
+    debugPrint("設定失敗: $e");
+  }
+
   runApp(const DragComponentApp());
 }
 
@@ -152,6 +163,7 @@ class LessonMenuPage extends StatelessWidget {
     );
   }
 }
+
 // --- 第四層：遊戲頁面 ---
 class DragGamePage extends StatefulWidget {
   final String info;
@@ -162,9 +174,14 @@ class DragGamePage extends StatefulWidget {
 }
 
 class _DragGamePageState extends State<DragGamePage> {
+  // 1. 變數宣告 (對應你原本的 177-179 行，並增加新功能所需的變數)
   List<Map<String, dynamic>> quizList = [];
   int currentIndex = 0;
   bool isLoading = true;
+
+  String? leftPlaced; // 紀錄左邊格子放了什麼字
+  String? rightPlaced; // 紀錄右邊格子放了什麼字
+  final PageController _pageController = PageController(); // 翻頁控制員
 
   @override
   void initState() {
@@ -172,25 +189,28 @@ class _DragGamePageState extends State<DragGamePage> {
     _fetchDataFromFirestore();
   }
 
-  // 自動轉換 ID 的邏輯
+  // --- 自動轉換 ID 的邏輯 (保持不變) ---
   String _generateDocId(String info) {
     try {
       final parts = info.split(' ');
       String v = parts[0] == '康軒' ? 'KSH' : (parts[0] == '南一' ? 'NY' : 'HL');
-      String g = parts[1].substring(0, 1); 
+      String g = parts[1].substring(0, 1);
       String s = parts[2] == '上學期' ? 'up' : 'down';
-      String l = parts[4].replaceAll(RegExp(r'[^0-9]'), ''); 
-      return "${v}_${g}up_L$l";
+      String l = parts[4].replaceAll(RegExp(r'[^0-9]'), '');
+      String finalId = "${v}_${g}${s}_L$l";
+      debugPrint("【偵錯】App 正在嘗試尋找的 ID 是: $finalId");
+      return finalId;
     } catch (e) {
       return "default_id";
     }
   }
 
+  // --- 抓取資料 (對應你原本 201 行之後的邏輯) ---
   Future<void> _fetchDataFromFirestore() async {
     try {
       String docId = _generateDocId(widget.info);
       DocumentSnapshot doc = await FirebaseFirestore.instance
-          .collection('lessons') // 請確保網頁端集合名稱是 lessons
+          .collection('lessons')
           .doc(docId)
           .get();
 
@@ -215,34 +235,153 @@ class _DragGamePageState extends State<DragGamePage> {
 
   @override
   Widget build(BuildContext context) {
-    if (isLoading) {
+    if (isLoading)
       return const Scaffold(body: Center(child: CircularProgressIndicator()));
-    }
-
-    if (quizList.isEmpty) {
+    if (quizList.isEmpty)
       return Scaffold(
-        appBar: AppBar(title: Text(widget.info), backgroundColor: Colors.teal[100]),
-        body: const Center(child: Text("資料庫還沒建立這課的資料喔！")),
+        appBar: AppBar(title: Text(widget.info)),
+        body: const Center(child: Text("尚無資料")),
       );
-    }
 
     final quiz = quizList[currentIndex];
 
     return Scaffold(
-      appBar: AppBar(title: Text(widget.info), backgroundColor: Colors.teal[100]),
-      body: Center(
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            Text(quiz['target'], style: const TextStyle(fontSize: 100, fontWeight: FontWeight.bold)),
-            Text(quiz['pinyin'] ?? '', style: const TextStyle(fontSize: 30, color: Colors.teal)),
-            const SizedBox(height: 40),
-            Text("組件：${quiz['left']} + ${quiz['right']}", style: const TextStyle(fontSize: 24)),
-            const SizedBox(height: 20),
-            const Text("✅ 雲端連線成功！", style: TextStyle(color: Colors.green, fontWeight: FontWeight.bold)),
-          ],
-        ),
+      appBar: AppBar(
+        title: Text(widget.info),
+        backgroundColor: Colors.teal[100],
+      ),
+      body: PageView(
+        controller: _pageController,
+        physics: const NeverScrollableScrollPhysics(), // 只能按按鈕翻頁，防止不小心滑動
+        children: [
+          _buildStudyPage(quiz), // 第一頁：觀察
+          _buildQuizPage(quiz), // 第二頁：挑戰
+        ],
       ),
     );
   }
-} // 這是最後一個關門大括號，務必保留
+
+  // 頁面 A：看字
+  Widget _buildStudyPage(Map<String, dynamic> quiz) {
+    return Column(
+      mainAxisAlignment: MainAxisAlignment.center,
+      children: [
+        const Text(
+          "👀 認真記住這個字",
+          style: TextStyle(fontSize: 20, color: Colors.grey),
+        ),
+        const SizedBox(height: 20),
+        Text(
+          quiz['target'],
+          style: const TextStyle(fontSize: 120, fontWeight: FontWeight.bold),
+        ),
+        Text(
+          quiz['pinyin'] ?? '',
+          style: const TextStyle(fontSize: 30, color: Colors.teal),
+        ),
+        const SizedBox(height: 50),
+        ElevatedButton(
+          onPressed: () => _pageController.nextPage(
+            duration: const Duration(milliseconds: 400),
+            curve: Curves.easeInOut,
+          ),
+          child: const Text("記好了，去挑戰！"),
+        ),
+      ],
+    );
+  }
+
+  // 頁面 B：拼字遊戲
+  Widget _buildQuizPage(Map<String, dynamic> quiz) {
+    List<String> options = List<String>.from(quiz['options']);
+
+    return Column(
+      mainAxisAlignment: MainAxisAlignment.center,
+      children: [
+        const Text("🧩 憑記憶拼出來", style: TextStyle(fontSize: 20)),
+        const SizedBox(height: 40),
+        Row(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            _buildTargetBox(quiz['left'], true), // 左格
+            const Text(" + ", style: TextStyle(fontSize: 30)),
+            _buildTargetBox(quiz['right'], false), // 右格
+          ],
+        ),
+        const SizedBox(height: 60),
+        Wrap(
+          spacing: 15,
+          children: options.map((char) => _buildDraggableItem(char)).toList(),
+        ),
+        const SizedBox(height: 50),
+        if (leftPlaced == quiz['left'] && rightPlaced == quiz['right'])
+          const Text(
+            "🎉 答對了！你太厲害了！",
+            style: TextStyle(
+              fontSize: 24,
+              color: Colors.green,
+              fontWeight: FontWeight.bold,
+            ),
+          ),
+      ],
+    );
+  }
+
+  Widget _buildDraggableItem(String char) {
+    return Draggable<String>(
+      data: char,
+      feedback: Material(
+        color: Colors.transparent,
+        child: Container(
+          padding: const EdgeInsets.all(10),
+          decoration: BoxDecoration(
+            color: Colors.teal,
+            borderRadius: BorderRadius.circular(8),
+          ),
+          child: Text(
+            char,
+            style: const TextStyle(
+              fontSize: 24,
+              color: Colors.white,
+              decoration: TextDecoration.none,
+            ),
+          ),
+        ),
+      ),
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 15, vertical: 8),
+        decoration: BoxDecoration(
+          color: Colors.teal[50],
+          borderRadius: BorderRadius.circular(8),
+          border: Border.all(color: Colors.teal),
+        ),
+        child: Text(char, style: const TextStyle(fontSize: 24)),
+      ),
+    );
+  }
+
+  Widget _buildTargetBox(String correctChar, bool isLeft) {
+    String? current = isLeft ? leftPlaced : rightPlaced;
+    bool isCorrect = current == correctChar;
+
+    return DragTarget<String>(
+      onAccept: (data) =>
+          setState(() => isLeft ? leftPlaced = data : rightPlaced = data),
+      builder: (context, candidateData, rejectedData) {
+        return Container(
+          width: 70,
+          height: 70,
+          alignment: Alignment.center,
+          decoration: BoxDecoration(
+            border: Border.all(
+              color: isCorrect ? Colors.green : Colors.grey,
+              width: 2,
+            ),
+            color: isCorrect ? Colors.green[50] : Colors.white,
+          ),
+          child: Text(current ?? '?', style: const TextStyle(fontSize: 30)),
+        );
+      },
+    );
+  }
+}
