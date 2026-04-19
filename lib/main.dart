@@ -30,21 +30,26 @@ void main() async {
 
   runApp(const DragComponentApp());
 }
-
 // ============================================================================
 // ✨ 課數大管家：老師請在這裡設定每個版本、年級的總課數
 // ============================================================================
 int getLessonCount(String version, String grade, String semester) {
+  // 統一學期格式
   String s = (semester == 'up' || semester == '上學期') ? '上' : '下';
+  
+  // ✨ 統一年級格式：只抓第一個字 (把 '一年級' 變 '一'，原本是 '一' 的就維持不變)
+  String g = grade.substring(0, 1);
 
-  if (version == '康軒' && grade == '一' && s == '上') return 10; 
-  if (version == '南一' && grade == '二' && s == '下') return 12; 
-  if (version == '翰林' && grade == '三' && s == '上') return 14; 
-
-  return 14; 
+  if (version == '康軒' && g == '一' && s == '上') return 6; 
+  if (version == '康軒' && g == '六' && s == '下') return 9;
+  if (version == '南一' && g == '一' && s == '上') return 7; 
+  if (version == '南一' && g == '六' && s == '下') return 9; 
+  if (version == '翰林' && g == '一' && s == '上') return 7; 
+  if (version == '翰林' && g == '六' && s == '下') return 9;
+  
+  return 12; // 預設值
 }
 // ============================================================================
-
 class DragComponentApp extends StatelessWidget {
   const DragComponentApp({super.key});
 
