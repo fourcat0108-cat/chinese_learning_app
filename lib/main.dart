@@ -1,9 +1,9 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/material.dart';
 import 'package:firebase_core/firebase_core.dart';
-import 'package:firebase_storage/firebase_storage.dart'; // ✨ 新增：檔案儲存套件
-import 'package:image_picker/image_picker.dart'; // ✨ 新增：選取圖片套件
-import 'package:flutter/services.dart'; // ✨ 新增：剪貼簿套件
+import 'package:firebase_storage/firebase_storage.dart'; 
+import 'package:image_picker/image_picker.dart'; 
+import 'package:flutter/services.dart'; 
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -31,13 +31,10 @@ void main() async {
   runApp(const DragComponentApp());
 }
 // ============================================================================
-// ✨ 課數大管家：老師請在這裡設定每個版本、年級的總課數
+// ✨ 課數大管家
 // ============================================================================
 int getLessonCount(String version, String grade, String semester) {
-  // 統一學期格式
   String s = (semester == 'up' || semester == '上學期') ? '上' : '下';
-  
-  // ✨ 統一年級格式：只抓第一個字 (把 '一年級' 變 '一'，原本是 '一' 的就維持不變)
   String g = grade.substring(0, 1);
 
   if (version == '康軒' && g == '一' && s == '上') return 6; 
@@ -47,7 +44,7 @@ int getLessonCount(String version, String grade, String semester) {
   if (version == '翰林' && g == '一' && s == '上') return 7; 
   if (version == '翰林' && g == '六' && s == '下') return 9;
   
-  return 12; // 預設值
+  return 12; 
 }
 // ============================================================================
 class DragComponentApp extends StatelessWidget {
@@ -249,39 +246,49 @@ class _DragGamePageState extends State<DragGamePage> {
     showErrors = List.filled(partsCount, false);
   }
 
+  // ✨ 讀取邏輯升級：先讀 lesson_mappings，再去 characters 撈詳細字體
   Future<void> _fetchDataFromFirestore() async {
     try {
       String docId = _generateDocId(widget.info);
-      DocumentSnapshot doc = await FirebaseFirestore.instance.collection('lessons').doc(docId).get();
+      
+      // 1. 去課次關聯表撈取該課的生字清單
+      DocumentSnapshot mappingDoc = await FirebaseFirestore.instance.collection('lesson_mappings').doc(docId).get();
 
-      if (doc.exists) {
-        Map<String, dynamic>? data = doc.data() as Map<String, dynamic>?;
-        if (data != null && data.containsKey('words')) {
-          List<Map<String, dynamic>> loadedList = List<Map<String, dynamic>>.from(data['words']);
+      if (mappingDoc.exists) {
+        Map<String, dynamic>? data = mappingDoc.data() as Map<String, dynamic>?;
+        if (data != null && data.containsKey('char_list')) {
+          List<dynamic> charList = data['char_list'];
           
-          for (var q in loadedList) {
-            if (q['parts'] == null) {
-              q['structure'] = '左右';
-              q['parts'] = [
-                {"char": q['left'] ?? '', "pinyin": q['left_pinyin'] ?? ''},
-                {"char": q['right'] ?? '', "pinyin": q['right_pinyin'] ?? ''}
-              ];
+          if (charList.isNotEmpty) {
+            List<Map<String, dynamic>> loadedList = [];
+            
+            // 2. 避免 Firestore whereIn 陣列超過 30 個的限制，進行分批(Chunking)抓取
+            for (int i = 0; i < charList.length; i += 30) {
+              int end = (i + 30 < charList.length) ? i + 30 : charList.length;
+              List<dynamic> chunk = charList.sublist(i, end);
+              
+              QuerySnapshot charSnap = await FirebaseFirestore.instance
+                  .collection('characters')
+                  .where(FieldPath.documentId, whereIn: chunk)
+                  .get();
+                  
+              loadedList.addAll(charSnap.docs.map((d) => d.data() as Map<String, dynamic>));
             }
-          }
 
-          setState(() {
-            quizList = loadedList;
-            if (quizList.isNotEmpty) {
+            // 3. 恢復課本原本的生字順序
+            loadedList.sort((a, b) => charList.indexOf(a['target']).compareTo(charList.indexOf(b['target'])));
+
+            setState(() {
+              quizList = loadedList;
               _initGameState(quizList[0]);
-            }
-            isLoading = false;
-          });
-        } else {
-          setState(() { isLoading = false; quizList = []; });
+              isLoading = false;
+            });
+            return;
+          }
         }
-      } else {
-        setState(() { isLoading = false; quizList = []; });
       }
+      // 找不到資料
+      setState(() { isLoading = false; quizList = []; });
     } catch (e) {
       debugPrint("抓取失敗: $e");
       setState(() { isLoading = false; });
@@ -572,7 +579,7 @@ class _DragGamePageState extends State<DragGamePage> {
 }
 
 // ============================================================================
-// ✨ 教師專屬上傳後台
+// ✨ 教師專屬上傳後台（方案 A 終極升級版：支援大量匯入總字庫）
 // ============================================================================
 class TeacherBackendPage extends StatefulWidget {
   const TeacherBackendPage({super.key});
@@ -582,6 +589,9 @@ class TeacherBackendPage extends StatefulWidget {
 }
 
 class _TeacherBackendPageState extends State<TeacherBackendPage> {
+  // 模式控制變數
+  bool isBulkImportMode = false; // ✨ 新增：是否開啟「大量匯入總字庫」模式
+
   String selectedVersion = '康軒';
   String selectedGrade = '一';
   String selectedSemester = 'up'; 
@@ -589,7 +599,7 @@ class _TeacherBackendPageState extends State<TeacherBackendPage> {
   
   final TextEditingController _dataController = TextEditingController();
   bool isUploading = false;
-  bool isUploadingImage = false; // ✨ 記錄圖片上傳狀態
+  bool isUploadingImage = false; 
 
   void _checkLessonLimit() {
     int maxLessons = getLessonCount(selectedVersion, selectedGrade, selectedSemester);
@@ -605,7 +615,6 @@ class _TeacherBackendPageState extends State<TeacherBackendPage> {
         title: Text(title, style: TextStyle(color: isSuccess ? Colors.green : Colors.red, fontWeight: FontWeight.bold)),
         content: Text(message, style: const TextStyle(fontSize: 18)),
         actions: [
-          // ✨ 如果有網址，顯示「複製網址」按鈕
           if (urlToCopy != null)
             ElevatedButton.icon(
               icon: const Icon(Icons.copy, color: Colors.white),
@@ -613,7 +622,7 @@ class _TeacherBackendPageState extends State<TeacherBackendPage> {
               style: ElevatedButton.styleFrom(backgroundColor: Colors.teal),
               onPressed: () {
                 Clipboard.setData(ClipboardData(text: urlToCopy));
-                ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('已複製圖片網址！請貼到 Excel 裡。')));
+                ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('已複製圖片網址！请貼到 Excel 裡。')));
                 Navigator.pop(context);
               },
             ),
@@ -631,7 +640,6 @@ class _TeacherBackendPageState extends State<TeacherBackendPage> {
     );
   }
 
-  // ✨ 終極升級：選取圖片並上傳到 Firebase Storage
   Future<void> _pickAndUploadImage() async {
     final ImagePicker picker = ImagePicker();
     final XFile? image = await picker.pickImage(source: ImageSource.gallery);
@@ -640,44 +648,33 @@ class _TeacherBackendPageState extends State<TeacherBackendPage> {
       setState(() => isUploadingImage = true);
       try {
         final bytes = await image.readAsBytes();
-        
-        // 建立唯一的檔案名稱
         String fileName = 'custom_images/${DateTime.now().millisecondsSinceEpoch}_${image.name}';
-        
-        // 指向 Firebase Storage
         Reference ref = FirebaseStorage.instance.ref().child(fileName);
-        
-        // 上傳檔案
         UploadTask uploadTask = ref.putData(bytes);
         TaskSnapshot snapshot = await uploadTask;
-        
-        // 取得可以顯示的網址
         String downloadUrl = await snapshot.ref.getDownloadURL();
 
         if (!mounted) return;
         _showResultDialog(
           "🖼️ 圖片上傳成功！", 
-          "圖片已經存入雲端，請點擊下方按鈕複製網址，然後將網址貼到您的 Excel 表格中代替文字部件！\n\n網址：\n$downloadUrl", 
+          "圖片已經存入雲端，請複製網址並貼到 Excel 表格中。\n\n網址：\n$downloadUrl", 
           isSuccess: true,
           urlToCopy: downloadUrl
         );
-
       } catch (e) {
         if (!mounted) return;
-        _showResultDialog(
-          "圖片上傳失敗 (權限問題)", 
-          "Firebase Storage 發生錯誤。這通常是因為您的 Storage 尚未開啟，或是規則不允許寫入。\n(提示：請到 Firebase Console 的 Storage -> Rules 將規則改為 allow read, write: if true;)\n\n錯誤代碼：\n$e"
-        );
+        _showResultDialog("圖片上傳失敗", "發生錯誤：\n$e");
       } finally {
         if (mounted) setState(() => isUploadingImage = false);
       }
     }
   }
 
+  // 🚀 核心改寫：支援無限大量分批上傳演算法
   Future<void> _uploadData() async {
     String rawText = _dataController.text.trim();
     if (rawText.isEmpty) {
-      _showResultDialog("提示", "你還沒貼上任何資料喔！請把 Excel 的資料貼到大格子裡。");
+      _showResultDialog("提示", "你還沒貼上任何資料喔！");
       return;
     }
 
@@ -685,19 +682,24 @@ class _TeacherBackendPageState extends State<TeacherBackendPage> {
 
     try {
       List<String> lines = rawText.split('\n');
-      List<Map<String, dynamic>> wordsToUpload = [];
+      
+      // 初始化批次大管家
+      WriteBatch currentBatch = FirebaseFirestore.instance.batch();
+      List<String> targetWords = [];
+      int operationCount = 0; // 紀錄目前 Batch 累積的操作數
+      int totalImportedCount = 0; // 紀錄總共成功解析的字數
 
       for (String line in lines) {
         if (line.trim().isEmpty) continue;
         
-        List<String> parts;
-        if (line.contains('\t')) {
-          parts = line.split('\t').map((e) => e.trim()).toList();
-        } else {
-          parts = line.split(RegExp(r',|，|、')).map((e) => e.trim()).toList();
-        }
+        List<String> parts = line.contains('\t') 
+            ? line.split('\t').map((e) => e.trim()).toList()
+            : line.split(RegExp(r',|，|、')).map((e) => e.trim()).toList();
 
         if (parts.length >= 6) {
+          String targetChar = parts[0];
+          targetWords.add(targetChar);
+
           String structure = parts[2];
           List<String> chars = parts[3].split('+').map((e) => e.trim()).toList();
           List<String> pinyins = parts[4].trim().isEmpty ? [] : parts[4].split('+').map((e) => e.trim()).toList();
@@ -710,58 +712,69 @@ class _TeacherBackendPageState extends State<TeacherBackendPage> {
             });
           }
 
-          List<String> parsedOptions = [];
-          if (parts[5].contains('http') || parts[5].contains(',') || parts[5].contains('，')) {
-             parsedOptions = parts[5].split(RegExp(r',|，')).map((e) => e.trim()).where((e) => e.isNotEmpty).toList();
-          } else {
-             parsedOptions = parts[5].replaceAll(' ', '').runes.map((r) => String.fromCharCode(r)).toList();
-          }
+          List<String> parsedOptions = (parts[5].contains('http') || parts[5].contains(',') || parts[5].contains('，'))
+              ? parts[5].split(RegExp(r',|，')).map((e) => e.trim()).where((e) => e.isNotEmpty).toList()
+              : parts[5].replaceAll(' ', '').runes.map((r) => String.fromCharCode(r)).toList();
 
-          wordsToUpload.add({
-            "target": parts[0],
+          // 1. 塞入主字庫的 Batch 隊列
+          DocumentReference charRef = FirebaseFirestore.instance.collection('characters').doc(targetChar);
+          currentBatch.set(charRef, {
+            "target": targetChar,
             "pinyin": parts[1], 
             "structure": structure,
             "parts": partList,
             "options": parsedOptions, 
-          });
-        } else {
-          debugPrint("❌ 這一行解析失敗：$line");
+          }, SetOptions(merge: true));
+          
+          operationCount++;
+          totalImportedCount++;
+
+          // 💡 防禦安全機制：如果快滿 400 筆限制，就先提交這一批，並開啟新的一批
+          if (operationCount >= 400) {
+            await currentBatch.commit();
+            currentBatch = FirebaseFirestore.instance.batch(); // 重置新批次
+            operationCount = 0;
+          }
         }
       }
 
-      if (wordsToUpload.isEmpty) {
+      // 檢查是否有落單的殘餘資料需要最後提交
+      if (operationCount > 0) {
+        await currentBatch.commit();
+      }
+
+      if (totalImportedCount == 0) {
         if (!mounted) return;
         setState(() => isUploading = false);
-        _showResultDialog(
-          "格式錯誤", 
-          "我們沒有找到符合格式的資料！\n\n請確認你貼上的資料有對齊這 6 個欄位：\n1.目標字\n2.拼音(可空)\n3.結構(獨體/左右...)\n4.部件(用+連)\n5.部件拼音(可空)\n6.拖拉選項"
-        );
+        _showResultDialog("格式錯誤", "沒有找到任何符合 6 欄位規格的生字資料！");
         return;
       }
 
-      String vStr = selectedVersion == '康軒' ? 'KSH' : (selectedVersion == '南一' ? 'NY' : 'HL');
-      String docId = "${vStr}_$selectedGrade${selectedSemester}_L$selectedLesson";
+      // 2. 判斷是否需要寫入課次關聯表
+      if (!isBulkImportMode) {
+        // 非大量匯入模式下，才去綁定課次書單
+        String vStr = selectedVersion == '康軒' ? 'KSH' : (selectedVersion == '南一' ? 'NY' : 'HL');
+        String docId = "${vStr}_$selectedGrade${selectedSemester}_L$selectedLesson";
 
-      await FirebaseFirestore.instance.collection('lessons').doc(docId).set({
-        'title': '$selectedVersion $selectedGrade年級 ${selectedSemester == 'up' ? '上學期' : '下學期'} 第 $selectedLesson 課',
-        'words': wordsToUpload,
-      });
+        await FirebaseFirestore.instance.collection('lesson_mappings').doc(docId).set({
+          'title': '$selectedVersion $selectedGrade年級 ${selectedSemester == 'up' ? '上學期' : '下學期'} 第 $selectedLesson 課',
+          'char_list': targetWords,
+        });
+      }
 
       if (!mounted) return;
       setState(() => isUploading = false);
-      _showResultDialog(
-        "🎉 上傳成功", 
-        "太棒了！成功上傳 ${wordsToUpload.length} 個生字到【$selectedVersion 第$selectedLesson課】！\n\n現在你可以回首頁點進去試玩了！", 
-        isSuccess: true
-      );
+
+      String modeSuccessMessage = isBulkImportMode
+          ? "🎉 成功匯入 $totalImportedCount 個生字直達【總字庫中心】！\n現有字庫底層已大幅充實！"
+          : "🎉 成功將 $totalImportedCount 個字存入總字庫，並與【$selectedVersion 第$selectedLesson課】書單綁定成功！";
+
+      _showResultDialog("🚀 上傳成功", modeSuccessMessage, isSuccess: true);
 
     } catch (e) {
       if (!mounted) return;
       setState(() => isUploading = false);
-      _showResultDialog(
-        "上傳失敗 (權限問題)", 
-        "Firebase 發生錯誤了！這通常是因為你的 Firebase 資料庫「不允許寫入」。\n\n錯誤代碼：\n$e"
-      );
+      _showResultDialog("上傳發生異常", "錯誤代碼：\n$e");
     }
   }
 
@@ -779,42 +792,64 @@ class _TeacherBackendPageState extends State<TeacherBackendPage> {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
-            const Text("1. 選擇要建檔的課次目標", style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: Colors.blueGrey)),
-            const SizedBox(height: 10),
-            
+            // ✨ 升級組件：模式切換卡片
             Card(
-              elevation: 3,
-              child: Padding(
-                padding: const EdgeInsets.all(16.0),
-                child: Column(
-                  children: [
-                    Row(
-                      mainAxisAlignment: MainAxisAlignment.spaceAround,
-                      children: [
-                        _buildDropdown('版本', ['康軒', '南一', '翰林'], selectedVersion, (v) => setState(() { selectedVersion = v!; _checkLessonLimit(); })),
-                        _buildDropdown('年級', ['一', '二', '三', '四', '五', '六'], selectedGrade, (v) => setState(() { selectedGrade = v!; _checkLessonLimit(); })),
-                      ],
-                    ),
-                    const SizedBox(height: 15),
-                    Row(
-                      mainAxisAlignment: MainAxisAlignment.spaceAround,
-                      children: [
-                        _buildDropdown('學期', ['up', 'down'], selectedSemester, (v) => setState(() { selectedSemester = v!; _checkLessonLimit(); }), displayMapper: (v) => v == 'up' ? '上學期' : '下學期'),
-                        
-                        _buildDropdown('課次', List.generate(currentMaxLessons, (index) => (index + 1).toString()), selectedLesson.toString(), (v) => setState(() => selectedLesson = int.parse(v!)), displayMapper: (v) => '第 $v 課'),
-                      ],
-                    ),
-                  ],
+              color: isBulkImportMode ? Colors.blue[50] : Colors.green[50],
+              child: SwitchListTile(
+                title: Text(
+                  isBulkImportMode ? "🚀 目前模式：純生字大量匯入總庫 (不限課次)" : "📂 目前模式：指定課次同步建檔",
+                  style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
                 ),
+                subtitle: Text(isBulkImportMode ? "適合一次性貼入幾百個生字，快速擴充電底層字庫" : "適合針對個別課本章節進行循序漸進的建檔"),
+                value: isBulkImportMode,
+                onChanged: (bool value) {
+                  setState(() {
+                    isBulkImportMode = value;
+                  });
+                },
               ),
             ),
-            const SizedBox(height: 30),
+            const SizedBox(height: 15),
 
-            // ✨ 在標題區塊加入上傳圖片按鈕
+            // 如果開啟了大量匯入總庫，就隱藏這個選課次的小字塊
+            if (!isBulkImportMode) ...[
+              const Text("1. 選擇要建檔的課次目標", style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: Colors.blueGrey)),
+              const SizedBox(height: 10),
+              Card(
+                elevation: 3,
+                child: Padding(
+                  padding: const EdgeInsets.all(16.0),
+                  child: Column(
+                    children: [
+                      Row(
+                        mainAxisAlignment: MainAxisAlignment.spaceAround,
+                        children: [
+                          _buildDropdown('版本', ['康軒', '南一', '翰林'], selectedVersion, (v) => setState(() { selectedVersion = v!; _checkLessonLimit(); })),
+                          _buildDropdown('年級', ['一', '二', '三', '四', '五', '六'], selectedGrade, (v) => setState(() { selectedGrade = v!; _checkLessonLimit(); })),
+                        ],
+                      ),
+                      const SizedBox(height: 15),
+                      Row(
+                        mainAxisAlignment: MainAxisAlignment.spaceAround,
+                        children: [
+                          _buildDropdown('學期', ['up', 'down'], selectedSemester, (v) => setState(() { selectedSemester = v!; _checkLessonLimit(); }), displayMapper: (v) => v == 'up' ? '上學期' : '下學期'),
+                          _buildDropdown('課次', List.generate(currentMaxLessons, (index) => (index + 1).toString()), selectedLesson.toString(), (v) => setState(() => selectedLesson = int.parse(v!)), displayMapper: (v) => '第 $v 課'),
+                        ],
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+              const SizedBox(height: 25),
+            ],
+
             Row(
               mainAxisAlignment: MainAxisAlignment.spaceBetween,
               children: [
-                const Text("2. 貼上生字資料 (從 Excel 複製)", style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: Colors.blueGrey)),
+                Text(
+                  isBulkImportMode ? "1. 貼上大量生字純文字 (將直接灌入主總庫)" : "2. 貼上生字資料 (從 Excel 複製)",
+                  style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: Colors.blueGrey),
+                ),
                 ElevatedButton.icon(
                   onPressed: isUploadingImage ? null : _pickAndUploadImage,
                   icon: isUploadingImage 
@@ -826,14 +861,14 @@ class _TeacherBackendPageState extends State<TeacherBackendPage> {
               ],
             ),
             const SizedBox(height: 5),
-            const Text("⚠️ 有圖片的請貼網址，並且選項用逗號 (,) 隔開！", style: TextStyle(color: Colors.red, fontSize: 14, fontWeight: FontWeight.bold)),
+            const Text("⚠️ 請確保格式欄位完整，混淆字選項請用逗號 (,) 隔開！", style: TextStyle(color: Colors.red, fontSize: 14, fontWeight: FontWeight.bold)),
             const SizedBox(height: 10),
 
             TextField(
               controller: _dataController,
-              maxLines: 12,
+              maxLines: 14,
               decoration: InputDecoration(
-                hintText: "教學範例：(請在 Excel 打好貼上)\n\n拍\tㄆㄞ\t左右\t扌+白\tㄕㄡˇ+ㄅㄞˊ\t木禾扌白日\n向\tㄒㄧㄤˋ\t內外\thttps://圖片網址.png+口\t+ㄎㄡˇ\thttps://圖片網址.png,口,日,白",
+                hintText: "大量匯入範例格式：\n字\tㄗˋ\t上下\t宀+子\tㄇㄧㄢˊ+ㄗˇ\t宀,子,字,學,宅,安\n繞\tㄖㄠˋ\t左右\t糸+堯\tㄇㄧˋ+ㄧㄠˊ\t糸,堯,繞,嚷,饒,燒",
                 border: const OutlineInputBorder(),
                 filled: true,
                 fillColor: Colors.grey[100],
@@ -844,13 +879,16 @@ class _TeacherBackendPageState extends State<TeacherBackendPage> {
             ElevatedButton(
               onPressed: isUploading ? null : _uploadData,
               style: ElevatedButton.styleFrom(
-                backgroundColor: Colors.orange,
+                backgroundColor: isBulkImportMode ? Colors.blue : Colors.orange,
                 padding: const EdgeInsets.symmetric(vertical: 15),
                 shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
               ),
               child: isUploading 
                   ? const CircularProgressIndicator(color: Colors.white) 
-                  : const Text("🚀 一鍵上傳至 Firebase", style: TextStyle(fontSize: 22, color: Colors.white, fontWeight: FontWeight.bold)),
+                  : Text(
+                      isBulkImportMode ? "🚀 啟動總字庫批次大量匯入" : "🚀 一鍵上傳並綁定課次", 
+                      style: const TextStyle(fontSize: 22, color: Colors.white, fontWeight: FontWeight.bold),
+                    ),
             ),
           ],
         ),
